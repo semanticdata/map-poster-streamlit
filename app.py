@@ -62,16 +62,24 @@ def init_session_state():
             "height": 16,
             "format": "png",
         }
-    if "highlight" not in st.session_state:
-        st.session_state.highlight = {
+    if "road_colors" not in st.session_state:
+        st.session_state.road_colors = {
             "motorway": True,
             "primary": True,
             "secondary": True,
             "tertiary": True,
             "residential": True,
         }
-    if "normalize_thickness" not in st.session_state:
-        st.session_state.normalize_thickness = False
+    if "road_thickness" not in st.session_state:
+        st.session_state.road_thickness = {
+            "motorway": True,
+            "primary": True,
+            "secondary": True,
+            "tertiary": True,
+            "residential": True,
+        }
+    if "normalize_all" not in st.session_state:
+        st.session_state.normalize_all = False
     if "generated_poster" not in st.session_state:
         st.session_state.generated_poster = None
     if "last_generation_time" not in st.session_state:
@@ -199,41 +207,112 @@ def render_sidebar():
         st.session_state.location["display_country"] = display_country if display_country else None
 
     with st.sidebar.expander("🛣️ Road Styles"):
-        st.caption("Roads to emphasize with thicker lines and special colors:")
+        # Global normalize option
+        st.session_state.normalize_all = st.checkbox(
+            "🔄 Normalize All",
+            value=st.session_state.normalize_all,
+            help="All roads use the same color and thickness",
+            key="sidebar_normalize_all",
+        )
 
-        st.session_state.highlight["motorway"] = st.checkbox(
-            "Motorways",
-            value=st.session_state.highlight["motorway"],
-            key="highlight_motorway",
-        )
-        st.session_state.highlight["primary"] = st.checkbox(
-            "Primary Roads",
-            value=st.session_state.highlight["primary"],
-            key="highlight_primary",
-        )
-        st.session_state.highlight["secondary"] = st.checkbox(
-            "Secondary Roads",
-            value=st.session_state.highlight["secondary"],
-            key="highlight_secondary",
-        )
-        st.session_state.highlight["tertiary"] = st.checkbox(
-            "Tertiary Roads",
-            value=st.session_state.highlight["tertiary"],
-            key="highlight_tertiary",
-        )
-        st.session_state.highlight["residential"] = st.checkbox(
-            "Residential Roads",
-            value=st.session_state.highlight["residential"],
-            key="highlight_residential",
-        )
+        if st.session_state.normalize_all:
+            st.caption("All options below are disabled when Normalize All is on")
+        else:
+            st.caption("Enable special colors and thicknesses per road type:")
 
         st.divider()
-        st.session_state.normalize_thickness = st.checkbox(
-            "Normalize Thickness",
-            value=st.session_state.normalize_thickness,
-            help="All roads will have the same thickness regardless of type",
-            key="sidebar_normalize_thickness",
-        )
+
+        disabled = st.session_state.normalize_all
+
+        # Motorways
+        st.markdown("**Motorways**")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.session_state.road_colors["motorway"] = st.checkbox(
+                "Color",
+                value=st.session_state.road_colors["motorway"],
+                key="color_motorway",
+                disabled=disabled,
+            )
+        with col2:
+            st.session_state.road_thickness["motorway"] = st.checkbox(
+                "Thickness",
+                value=st.session_state.road_thickness["motorway"],
+                key="thickness_motorway",
+                disabled=disabled,
+            )
+
+        # Primary Roads
+        st.markdown("**Primary Roads**")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.session_state.road_colors["primary"] = st.checkbox(
+                "Color",
+                value=st.session_state.road_colors["primary"],
+                key="color_primary",
+                disabled=disabled,
+            )
+        with col2:
+            st.session_state.road_thickness["primary"] = st.checkbox(
+                "Thickness",
+                value=st.session_state.road_thickness["primary"],
+                key="thickness_primary",
+                disabled=disabled,
+            )
+
+        # Secondary Roads
+        st.markdown("**Secondary Roads**")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.session_state.road_colors["secondary"] = st.checkbox(
+                "Color",
+                value=st.session_state.road_colors["secondary"],
+                key="color_secondary",
+                disabled=disabled,
+            )
+        with col2:
+            st.session_state.road_thickness["secondary"] = st.checkbox(
+                "Thickness",
+                value=st.session_state.road_thickness["secondary"],
+                key="thickness_secondary",
+                disabled=disabled,
+            )
+
+        # Tertiary Roads
+        st.markdown("**Tertiary Roads**")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.session_state.road_colors["tertiary"] = st.checkbox(
+                "Color",
+                value=st.session_state.road_colors["tertiary"],
+                key="color_tertiary",
+                disabled=disabled,
+            )
+        with col2:
+            st.session_state.road_thickness["tertiary"] = st.checkbox(
+                "Thickness",
+                value=st.session_state.road_thickness["tertiary"],
+                key="thickness_tertiary",
+                disabled=disabled,
+            )
+
+        # Residential Roads
+        st.markdown("**Residential Roads**")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.session_state.road_colors["residential"] = st.checkbox(
+                "Color",
+                value=st.session_state.road_colors["residential"],
+                key="color_residential",
+                disabled=disabled,
+            )
+        with col2:
+            st.session_state.road_thickness["residential"] = st.checkbox(
+                "Thickness",
+                value=st.session_state.road_thickness["residential"],
+                key="thickness_residential",
+                disabled=disabled,
+            )
 
 
 def render_debug_panel():
@@ -348,8 +427,9 @@ def render_main_area():
                 theme=theme,
                 display_city=st.session_state.location.get("display_city"),
                 display_country=st.session_state.location.get("display_country"),
-                highlight_roads=st.session_state.highlight,
-                normalize_thickness=st.session_state.normalize_thickness,
+                road_colors=st.session_state.road_colors,
+                road_thickness=st.session_state.road_thickness,
+                normalize_all=st.session_state.normalize_all,
             )
 
             if fig is None:
