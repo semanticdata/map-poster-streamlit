@@ -186,6 +186,8 @@ def render_main_area():
     """Render main content area."""
     st.title("🗺️ Map Poster Generator")
 
+    st.caption("⏱️ Note: Poster generation takes 1-3 minutes. This app runs on free tier hardware, please be patient!")
+
     city = st.session_state.location["city"]
     country = st.session_state.location["country"]
 
