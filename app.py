@@ -50,6 +50,9 @@ def init_session_state():
             "city": "",
             "country": "",
             "coords": None,
+            "mode": "city_country",  # "city_country" or "coordinates"
+            "lat": "",
+            "lon": "",
         }
     if "settings" not in st.session_state:
         st.session_state.settings = {
@@ -59,6 +62,16 @@ def init_session_state():
             "height": 16,
             "format": "png",
         }
+    if "highlight" not in st.session_state:
+        st.session_state.highlight = {
+            "motorway": True,
+            "primary": True,
+            "secondary": True,
+            "tertiary": True,
+            "residential": True,
+        }
+    if "normalize_thickness" not in st.session_state:
+        st.session_state.normalize_thickness = False
     if "generated_poster" not in st.session_state:
         st.session_state.generated_poster = None
     if "last_generation_time" not in st.session_state:
@@ -70,23 +83,46 @@ def render_sidebar():
     st.sidebar.title("⚙️ Configuration")
 
     with st.sidebar.expander("📍 Location", expanded=True):
-        col1, col2 = st.columns(2)
-        with col1:
+        location_mode = st.radio(
+            "Input Mode",
+            options=["City/Country", "Coordinates"],
+            index=0 if st.session_state.location["mode"] == "city_country" else 1,
+            key="sidebar_location_mode",
+        )
+        st.session_state.location["mode"] = (
+            "city_country" if location_mode == "City/Country" else "coordinates"
+        )
+
+        if st.session_state.location["mode"] == "city_country":
             city = st.text_input(
                 "City",
                 value=st.session_state.location["city"],
                 placeholder="e.g. Paris",
                 key="sidebar_city",
             )
-        with col2:
+            st.session_state.location["city"] = city
             country = st.text_input(
                 "Country",
                 value=st.session_state.location["country"],
                 placeholder="e.g. France",
                 key="sidebar_country",
             )
-        st.session_state.location["city"] = city
-        st.session_state.location["country"] = country
+            st.session_state.location["country"] = country
+        else:
+            lat = st.text_input(
+                "Latitude",
+                value=st.session_state.location["lat"],
+                placeholder="e.g. 48.8566",
+                key="sidebar_lat",
+            )
+            st.session_state.location["lat"] = lat
+            lon = st.text_input(
+                "Longitude",
+                value=st.session_state.location["lon"],
+                placeholder="e.g. 2.3522",
+                key="sidebar_lon",
+            )
+            st.session_state.location["lon"] = lon
 
     with st.sidebar.expander("🎨 Visual Settings", expanded=True):
         themes_info = get_all_themes_info()
@@ -162,6 +198,43 @@ def render_sidebar():
         st.session_state.location["display_city"] = display_city if display_city else None
         st.session_state.location["display_country"] = display_country if display_country else None
 
+    with st.sidebar.expander("🛣️ Road Styles"):
+        st.caption("Roads to emphasize with thicker lines and special colors:")
+
+        st.session_state.highlight["motorway"] = st.checkbox(
+            "Motorways",
+            value=st.session_state.highlight["motorway"],
+            key="highlight_motorway",
+        )
+        st.session_state.highlight["primary"] = st.checkbox(
+            "Primary Roads",
+            value=st.session_state.highlight["primary"],
+            key="highlight_primary",
+        )
+        st.session_state.highlight["secondary"] = st.checkbox(
+            "Secondary Roads",
+            value=st.session_state.highlight["secondary"],
+            key="highlight_secondary",
+        )
+        st.session_state.highlight["tertiary"] = st.checkbox(
+            "Tertiary Roads",
+            value=st.session_state.highlight["tertiary"],
+            key="highlight_tertiary",
+        )
+        st.session_state.highlight["residential"] = st.checkbox(
+            "Residential Roads",
+            value=st.session_state.highlight["residential"],
+            key="highlight_residential",
+        )
+
+        st.divider()
+        st.session_state.normalize_thickness = st.checkbox(
+            "Normalize Thickness",
+            value=st.session_state.normalize_thickness,
+            help="All roads will have the same thickness regardless of type",
+            key="sidebar_normalize_thickness",
+        )
+
 
 def render_debug_panel():
     """Render debug panel (hidden behind checkbox)."""
@@ -186,14 +259,36 @@ def render_main_area():
     """Render main content area."""
     st.title("🗺️ Map Poster Generator")
 
-    st.caption("⏱️ Note: Poster generation takes 1-3 minutes. This app runs on free tier hardware, please be patient!")
+    st.caption(
+        "⏱️ Note: Poster generation takes 1-3 minutes. This app runs on free tier hardware, please be patient!"
+    )
 
     city = st.session_state.location["city"]
     country = st.session_state.location["country"]
+    lat = st.session_state.location["lat"]
+    lon = st.session_state.location["lon"]
+    mode = st.session_state.location["mode"]
 
-    if not city or not country:
-        st.info("👈 Enter a city and country in the sidebar to get started.")
-        return
+    # Validate input based on mode
+    if mode == "city_country":
+        if not city or not country:
+            st.info("👈 Enter a city and country in the sidebar to get started.")
+            return
+    else:  # coordinates mode
+        if not lat or not lon:
+            st.info("👈 Enter latitude and longitude in the sidebar to get started.")
+            return
+        try:
+            lat_float = float(lat)
+            lon_float = float(lon)
+            if not (-90 <= lat_float <= 90) or not (-180 <= lon_float <= 180):
+                st.error(
+                    "❌ Invalid coordinates. Latitude must be -90 to 90, Longitude must be -180 to 180."
+                )
+                return
+        except ValueError:
+            st.error("❌ Invalid coordinates. Please enter numeric values.")
+            return
 
     col1, col2 = st.columns([2, 1])
 
@@ -208,27 +303,44 @@ def render_main_area():
             city, country = random.choice(EXAMPLE_CITIES)
             st.session_state.location["city"] = city
             st.session_state.location["country"] = country
+            st.session_state.location["mode"] = "city_country"
             st.rerun()
             return
 
-        with st.spinner(f"🗺️ Fetching map data for {city}, {country}..."):
-            coords = get_coordinates(city, country)
+        coords = None
+        display_city_name = None
+        display_country_name = None
 
-            if not coords:
-                st.error(f"❌ Could not find coordinates for '{city}, {country}'. Check the spelling and try again.")
-                return
+        if mode == "city_country":
+            with st.spinner(f"🗺️ Fetching map data for {city}, {country}..."):
+                coords = get_coordinates(city, country)
 
-            st.session_state.location["coords"] = coords
-            lat, lon = coords
-            st.success(f"✅ Found coordinates: {lat:.4f}, {lon:.4f}")
+                if not coords:
+                    st.error(
+                        f"❌ Could not find coordinates for '{city}, {country}'. Check the spelling and try again."
+                    )
+                    return
+
+                st.session_state.location["coords"] = coords
+                lat_float, lon_float = coords
+                display_city_name = city
+                display_country_name = country
+                st.success(f"✅ Found coordinates: {lat_float:.4f}, {lon_float:.4f}")
+        else:
+            lat_float = float(lat)
+            lon_float = float(lon)
+            coords = (lat_float, lon_float)
+            display_city_name = st.session_state.location.get("display_city") or "Custom"
+            display_country_name = st.session_state.location.get("display_country") or "Location"
+            st.success(f"✅ Using coordinates: {lat_float:.4f}, {lon_float:.4f}")
 
         with st.spinner("🎨 Generating poster..."):
             theme_name = st.session_state.settings["theme"]
             theme = load_theme(theme_name)
 
             fig = create_poster(
-                city=city,
-                country=country,
+                city=display_city_name,
+                country=display_country_name,
                 point=coords,
                 dist=st.session_state.settings["distance"],
                 width=st.session_state.settings["width"],
@@ -236,6 +348,8 @@ def render_main_area():
                 theme=theme,
                 display_city=st.session_state.location.get("display_city"),
                 display_country=st.session_state.location.get("display_country"),
+                highlight_roads=st.session_state.highlight,
+                normalize_thickness=st.session_state.normalize_thickness,
             )
 
             if fig is None:

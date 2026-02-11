@@ -142,17 +142,31 @@ def create_gradient_fade(ax, color: str, location: str = "bottom", zorder: int =
     )
 
 
-def get_edge_colors_by_type(g: MultiDiGraph, theme: dict[str, str]) -> list[str]:
+def get_edge_colors_by_type(
+    g: MultiDiGraph, theme: dict[str, str], highlight_roads: dict[str, bool] | None = None
+) -> list[str]:
     """
     Assigns colors to edges based on road type hierarchy.
 
     Args:
         g: NetworkX graph
         theme: Theme dictionary with color values
+        highlight_roads: Dictionary mapping road types to bool (whether to highlight).
+                        If None, all roads are highlighted. Non-highlighted roads
+                        use the default road color.
 
     Returns:
         List of colors corresponding to each edge
     """
+    if highlight_roads is None:
+        highlight_roads = {
+            "motorway": True,
+            "primary": True,
+            "secondary": True,
+            "tertiary": True,
+            "residential": True,
+        }
+
     edge_colors = []
 
     for _u, _v, data in g.edges(data=True):
@@ -164,8 +178,10 @@ def get_edge_colors_by_type(g: MultiDiGraph, theme: dict[str, str]) -> list[str]
         color = theme["road_default"]
         for road_type, road_keys in ROAD_HIERARCHY.items():
             if highway in road_keys:
-                theme_key = f"road_{road_type}"
-                color = theme.get(theme_key, theme["road_default"])
+                if highlight_roads.get(road_type, True):
+                    theme_key = f"road_{road_type}"
+                    color = theme.get(theme_key, theme["road_default"])
+                # else: keep default color for non-highlighted roads
                 break
 
         edge_colors.append(color)
@@ -182,16 +198,33 @@ ROAD_WIDTHS = {
 }
 
 
-def get_edge_widths_by_type(g: MultiDiGraph) -> list[float]:
+def get_edge_widths_by_type(
+    g: MultiDiGraph,
+    highlight_roads: dict[str, bool] | None = None,
+    normalize_thickness: bool = False,
+) -> list[float]:
     """
     Assigns line widths to edges based on road type.
 
     Args:
         g: NetworkX graph
+        highlight_roads: Dictionary mapping road types to bool (whether to highlight).
+                        If None, all roads are highlighted. Non-highlighted roads
+                        use the standard (residential) width.
+        normalize_thickness: If True, all roads use the same width regardless of type.
 
     Returns:
         List of widths corresponding to each edge
     """
+    if highlight_roads is None:
+        highlight_roads = {
+            "motorway": True,
+            "primary": True,
+            "secondary": True,
+            "tertiary": True,
+            "residential": True,
+        }
+
     edge_widths = []
 
     for _u, _v, data in g.edges(data=True):
@@ -201,10 +234,17 @@ def get_edge_widths_by_type(g: MultiDiGraph) -> list[float]:
             highway = highway[0] if highway else "unclassified"
 
         width = ROAD_WIDTHS.get("residential", 0.4)
-        for road_type, road_keys in ROAD_HIERARCHY.items():
-            if highway in road_keys:
-                width = ROAD_WIDTHS.get(road_type, width)
-                break
+
+        if normalize_thickness:
+            # All roads get the same standard width
+            width = ROAD_WIDTHS.get("residential", 0.4)
+        else:
+            for road_type, road_keys in ROAD_HIERARCHY.items():
+                if highway in road_keys:
+                    if highlight_roads.get(road_type, True):
+                        width = ROAD_WIDTHS.get(road_type, width)
+                    # else: keep standard width for non-highlighted roads
+                    break
 
         edge_widths.append(width)
 
@@ -294,7 +334,7 @@ def fetch_graph(point: tuple[float, float], dist: int) -> MultiDiGraph | None:
             logger.warning(f"Failed to cache graph: {e}")
         return g
 
-    except ox.exceptions.InsufficientResponseError:
+    except ox._errors.InsufficientResponseError:
         logger.warning(f"Insufficient OSM data for location {lat:.4f}, {lon:.4f}")
         return None
     except Exception as e:
@@ -335,7 +375,7 @@ def fetch_features(
             logger.warning(f"Failed to cache {name} features: {e}")
         return data
 
-    except ox.exceptions.InsufficientResponseError:
+    except ox._errors.InsufficientResponseError:
         logger.debug(f"No {name} features found for location")
         return None
     except Exception as e:
@@ -391,6 +431,8 @@ def create_poster(
     fonts: dict[str, str] | None = None,
     display_city: str | None = None,
     display_country: str | None = None,
+    highlight_roads: dict[str, bool] | None = None,
+    normalize_thickness: bool = False,
 ) -> plt.Figure | None:
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -406,6 +448,8 @@ def create_poster(
         fonts: Font dictionary with paths
         display_city: Override city name on poster
         display_country: Override country name on poster
+        highlight_roads: Dictionary mapping road types to bool for highlighting
+        normalize_thickness: If True, all roads use the same line thickness
 
     Returns:
         Matplotlib figure or None if generation fails
@@ -475,8 +519,8 @@ def create_poster(
                         parks_polys = parks_polys.to_crs(g_proj.graph["crs"])
                     parks_polys.plot(ax=ax, facecolor=theme["parks"], edgecolor="none", zorder=0.8)
 
-            edge_colors = get_edge_colors_by_type(g_proj, theme)
-            edge_widths = get_edge_widths_by_type(g_proj)
+            edge_colors = get_edge_colors_by_type(g_proj, theme, highlight_roads)
+            edge_widths = get_edge_widths_by_type(g_proj, highlight_roads, normalize_thickness)
 
             crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
 
