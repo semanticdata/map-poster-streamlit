@@ -350,8 +350,8 @@ def render_debug_panel():
                 st.text_area(
                     "Last Result",
                     value=f"Coordinates: {geo_debug['last_result'].get('coordinates', 'N/A')}\n"
-                          f"Address: {geo_debug['last_result'].get('address', 'N/A')}\n"
-                          f"Time: {geo_debug['last_result'].get('elapsed_seconds', 'N/A')}s",
+                    f"Address: {geo_debug['last_result'].get('address', 'N/A')}\n"
+                    f"Time: {geo_debug['last_result'].get('elapsed_seconds', 'N/A')}s",
                     disabled=True,
                     height=100,
                 )
@@ -372,7 +372,9 @@ def render_debug_panel():
                 with st.spinner("Testing geocoding for Paris, France..."):
                     result = get_coordinates("Paris", "France")
                     if result:
-                        st.success(f"Test successful! Coordinates: {result[0]:.4f}, {result[1]:.4f}")
+                        st.success(
+                            f"Test successful! Coordinates: {result[0]:.4f}, {result[1]:.4f}"
+                        )
                     else:
                         st.error("Test failed!")
                     st.rerun()

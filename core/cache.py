@@ -244,4 +244,3 @@ def cache_get_stats() -> dict[str, Any]:
         "expired": expired,
         "valid": valid,
     }
-
