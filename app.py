@@ -317,6 +317,15 @@ def render_sidebar():
             )
 
 
+def is_rate_limit_error():
+    """Check if last geocoding error was due to rate limiting."""
+    geo_debug = get_geocoding_debug_info()
+    last_error = geo_debug.get("last_error", "")
+    if not last_error:
+        return False
+    return "509" in last_error or "Bandwidth Limit" in last_error or "rate limit" in last_error.lower()
+
+
 def render_debug_panel():
     """Render debug panel (hidden behind checkbox)."""
     show_debug = st.sidebar.toggle("🐛 Debug Mode", value=False)
@@ -441,9 +450,30 @@ def render_main_area():
                 coords = get_coordinates(city, country)
 
                 if not coords:
-                    st.error(
-                        f"❌ Could not find coordinates for '{city}, {country}'. Check the spelling and try again."
-                    )
+                    if is_rate_limit_error():
+                        st.error(
+                            f"❌ Geocoding service is currently rate-limited. "
+                            f"Unable to find coordinates for '{city}, {country}'."
+                        )
+                        st.warning(
+                            """
+                            **Alternative Solution:** Use the **Coordinates** input mode instead.
+                            
+                            To find coordinates for your location:
+                            1. Visit [OpenStreetMap.org](https://www.openstreetmap.org/)
+                            2. Navigate to your desired location
+                            3. Right-click on the map
+                            4. Select "Show address" to see the latitude/longitude
+                            5. Copy the coordinates and paste them in the sidebar
+                            """
+                        )
+                        if st.button("🔄 Switch to Coordinates Mode", key="switch_to_coords", use_container_width=True):
+                            st.session_state.location["mode"] = "coordinates"
+                            st.rerun()
+                    else:
+                        st.error(
+                            f"❌ Could not find coordinates for '{city}, {country}'. Check the spelling and try again."
+                        )
                     return
 
                 st.session_state.location["coords"] = coords
