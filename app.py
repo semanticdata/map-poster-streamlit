@@ -634,7 +634,7 @@ def render_main_area():
                         st.warning(
                             """
                             **Alternative Solution:** Use the **Coordinates** input mode instead.
-                            
+
                             To find coordinates for your location:
                             1. Visit [OpenStreetMap.org](https://www.openstreetmap.org/)
                             2. Navigate to your desired location

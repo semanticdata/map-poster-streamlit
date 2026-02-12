@@ -352,8 +352,6 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
         f"Nominatim geolocator configured with timeout={NOMINATIM_TIMEOUT}s, user_agent='{NOMINATIM_USER_AGENT}'"
     )
 
-    last_exception = None
-
     for attempt in range(MAX_RETRIES):
         start_time = time.time()
 
@@ -407,7 +405,6 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
             break
 
         except GeocoderTimedOut as e:
-            last_exception = e
             elapsed = time.time() - start_time
             error_msg = f"Geocoding timed out after {elapsed:.2f}s: {e}"
             logger.warning(f"TIMEOUT (attempt {attempt + 1}): {error_msg}")
@@ -417,7 +414,6 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
                 _geocoding_debug_info["failure_count"] += 1
 
         except GeocoderServiceError as e:
-            last_exception = e
             elapsed = time.time() - start_time
             error_msg = f"Geocoding service error after {elapsed:.2f}s: {e}"
 
@@ -453,7 +449,6 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
                     _geocoding_debug_info["failure_count"] += 1
 
         except (ValueError, AttributeError) as e:
-            last_exception = e
             elapsed = time.time() - start_time
             error_msg = f"Invalid geocoding response after {elapsed:.2f}s: {e}"
             logger.error(f"INVALID (attempt {attempt + 1}): {error_msg}")
@@ -463,7 +458,6 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
                 _geocoding_debug_info["failure_count"] += 1
 
         except Exception as e:
-            last_exception = e
             elapsed = time.time() - start_time
             error_msg = f"Unexpected error after {elapsed:.2f}s: {e}"
             logger.error(f"ERROR (attempt {attempt + 1}): {error_msg}")
