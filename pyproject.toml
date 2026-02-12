@@ -51,3 +51,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "app.py" = ["B008"] # streamlit widget defaults
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.0",
+]
