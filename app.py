@@ -106,24 +106,24 @@ def calculate_aspect_ratio_display(width, height):
     """
     if height == 0:
         return "Custom"
-    
+
     ratio = width / height
     ratio_map = {
-        (16/9): "16:9",
-        (16/10): "16:10",
-        (9/16): "9:16",
-        (9/19): "9:19",
-        (9/20): "9:20",
-        (3/4): "3:4",
-        (2/3): "2:3",
-        (1/1): "1:1",
-        (11.7/8.3): "A4",
+        (16 / 9): "16:9",
+        (16 / 10): "16:10",
+        (9 / 16): "9:16",
+        (9 / 19): "9:19",
+        (9 / 20): "9:20",
+        (3 / 4): "3:4",
+        (2 / 3): "2:3",
+        (1 / 1): "1:1",
+        (11.7 / 8.3): "A4",
     }
-    
+
     for exact_ratio, name in ratio_map.items():
         if abs(ratio - exact_ratio) < 0.01:
             return name
-    
+
     return f"{ratio:.2f}:1"
 
 
@@ -138,7 +138,7 @@ def apply_aspect_ratio(width_ratio, height_ratio, base_width):
     """
     base_width = float(base_width)
     base_height = base_width * (float(height_ratio) / float(width_ratio))
-    
+
     if base_height < 4:
         scale_factor = 4.0 / base_height
         base_width *= scale_factor
@@ -147,21 +147,21 @@ def apply_aspect_ratio(width_ratio, height_ratio, base_width):
         scale_factor = 20.0 / base_height
         base_width *= scale_factor
         base_height = 20.0
-    
+
     new_width = round(base_width, 1)
     new_height = round(base_height, 1)
-    
+
     st.session_state.settings["width"] = new_width
     st.session_state.settings["height"] = new_height
     st.session_state.preset_just_applied = True
-    
+
     logger.info(f"Aspect ratio applied: {width_ratio}:{height_ratio} -> {new_width}x{new_height}")
-    
+
     # Force widget keys to reset by incrementing a counter
     if "preset_counter" not in st.session_state:
         st.session_state.preset_counter = 0
     st.session_state.preset_counter += 1
-    
+
     st.rerun()
 
 
@@ -250,19 +250,19 @@ def render_sidebar():
                 step=0.1,
                 key=f"sidebar_height_{st.session_state.get('preset_counter', 0)}",
             )
-        
+
         # Always save from number inputs (preset flag only controls whether to skip on THIS rerun)
         st.session_state.settings["width"] = float(width)
         st.session_state.settings["height"] = float(height)
-        
+
         # Reset preset flag after we've processed the number inputs
         if st.session_state.preset_just_applied:
-            logger.info(f"Preset was applied, skipping number input values")
+            logger.info("Preset was applied, skipping number input values")
             st.session_state.preset_just_applied = False
             # Restore session state values that were set by preset
             st.session_state.settings["width"] = float(st.session_state.settings["width"])
             st.session_state.settings["height"] = float(st.session_state.settings["height"])
-        
+
         width_px = int(width * st.session_state.settings["dpi"])
         height_px = int(height * st.session_state.settings["dpi"])
         st.caption(f"📐 Output: {width:.1f} in × {height:.1f} in ({width_px} × {height_px} px)")
@@ -316,7 +316,7 @@ def render_sidebar():
         # Show current aspect ratio prominently
         width = st.session_state.settings.get("width", 12.0)
         height = st.session_state.settings.get("height", 16.0)
-        
+
         current_ratio = calculate_aspect_ratio_display(width, height)
         st.info(f"📐 Current: {current_ratio}")
 
@@ -358,7 +358,7 @@ def render_sidebar():
         st.markdown("**Social Media**")
         if st.button("1:1 (Instagram)", key="preset_1_1", use_container_width=True):
             apply_aspect_ratio(1, 1, 12)
-        
+
         st.divider()
         st.caption("💡 Tips:")
         st.caption("- Use presets for quick aspect ratios")
@@ -480,7 +480,9 @@ def is_rate_limit_error():
     last_error = geo_debug.get("last_error", "")
     if not last_error:
         return False
-    return "509" in last_error or "Bandwidth Limit" in last_error or "rate limit" in last_error.lower()
+    return (
+        "509" in last_error or "Bandwidth Limit" in last_error or "rate limit" in last_error.lower()
+    )
 
 
 def render_debug_panel():
@@ -544,20 +546,20 @@ def render_debug_panel():
                     else:
                         st.error("Test failed!")
                     st.rerun()
-        
+
         with st.sidebar.expander("🔍 Session State Debug"):
             st.write("**Settings:**")
             st.write(f"- width: {st.session_state.settings.get('width', 'NOT SET')}")
             st.write(f"- height: {st.session_state.settings.get('height', 'NOT SET')}")
             st.write(f"- dpi: {st.session_state.settings.get('dpi', 'NOT SET')}")
             st.write(f"- distance: {st.session_state.settings.get('distance', 'NOT SET')}")
-            
+
             st.write("**Flags:**")
             st.write(f"- preset_just_applied: {st.session_state.preset_just_applied}")
-            
+
             st.write("**Aspect Ratio:**")
-            width = st.session_state.settings.get('width', 0)
-            height = st.session_state.settings.get('height', 0)
+            width = st.session_state.settings.get("width", 0)
+            height = st.session_state.settings.get("height", 0)
             ratio = width / height if height > 0 else 0
             st.write(f"- Current ratio: {ratio:.2f}")
             st.write(f"- Display: {calculate_aspect_ratio_display(width, height)}")
@@ -641,7 +643,11 @@ def render_main_area():
                             5. Copy the coordinates and paste them in the sidebar
                             """
                         )
-                        if st.button("🔄 Switch to Coordinates Mode", key="switch_to_coords", use_container_width=True):
+                        if st.button(
+                            "🔄 Switch to Coordinates Mode",
+                            key="switch_to_coords",
+                            use_container_width=True,
+                        ):
                             st.session_state.location["mode"] = "coordinates"
                             st.rerun()
                     else:
