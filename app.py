@@ -60,10 +60,15 @@ def init_session_state():
         st.session_state.settings = {
             "theme": "terracotta",
             "distance": 18000,
-            "width": 12,
-            "height": 16,
+            "width": 12.0,
+            "height": 16.0,
             "format": "png",
+            "dpi": 300.0,
         }
+    if "preset_just_applied" not in st.session_state:
+        st.session_state.preset_just_applied = False
+    if "preset_counter" not in st.session_state:
+        st.session_state.preset_counter = 0
     if "road_colors" not in st.session_state:
         st.session_state.road_colors = {
             "motorway": True,
@@ -86,6 +91,78 @@ def init_session_state():
         st.session_state.generated_poster = None
     if "last_generation_time" not in st.session_state:
         st.session_state.last_generation_time = None
+
+
+def calculate_aspect_ratio_display(width, height):
+    """
+    Calculate human-readable aspect ratio from dimensions.
+
+    Args:
+        width: Width in inches
+        height: Height in inches
+
+    Returns:
+        Human-readable aspect ratio string
+    """
+    if height == 0:
+        return "Custom"
+    
+    ratio = width / height
+    ratio_map = {
+        (16/9): "16:9",
+        (16/10): "16:10",
+        (9/16): "9:16",
+        (9/19): "9:19",
+        (9/20): "9:20",
+        (3/4): "3:4",
+        (2/3): "2:3",
+        (1/1): "1:1",
+        (11.7/8.3): "A4",
+    }
+    
+    for exact_ratio, name in ratio_map.items():
+        if abs(ratio - exact_ratio) < 0.01:
+            return name
+    
+    return f"{ratio:.2f}:1"
+
+
+def apply_aspect_ratio(width_ratio, height_ratio, base_width):
+    """
+    Apply aspect ratio while maintaining reasonable dimensions.
+
+    Args:
+        width_ratio: Width part of aspect ratio (e.g., 16 for 16:9)
+        height_ratio: Height part of aspect ratio (e.g., 9 for 16:9)
+        base_width: Desired width in inches
+    """
+    base_width = float(base_width)
+    base_height = base_width * (float(height_ratio) / float(width_ratio))
+    
+    if base_height < 4:
+        scale_factor = 4.0 / base_height
+        base_width *= scale_factor
+        base_height = 4.0
+    elif base_height > 20:
+        scale_factor = 20.0 / base_height
+        base_width *= scale_factor
+        base_height = 20.0
+    
+    new_width = round(base_width, 1)
+    new_height = round(base_height, 1)
+    
+    st.session_state.settings["width"] = new_width
+    st.session_state.settings["height"] = new_height
+    st.session_state.preset_just_applied = True
+    
+    logger.info(f"Aspect ratio applied: {width_ratio}:{height_ratio} -> {new_width}x{new_height}")
+    
+    # Force widget keys to reset by incrementing a counter
+    if "preset_counter" not in st.session_state:
+        st.session_state.preset_counter = 0
+    st.session_state.preset_counter += 1
+    
+    st.rerun()
 
 
 def render_sidebar():
@@ -158,23 +235,37 @@ def render_sidebar():
         with col1:
             width = st.number_input(
                 "Width (in)",
-                min_value=4,
-                max_value=20,
+                min_value=4.0,
+                max_value=20.0,
                 value=st.session_state.settings["width"],
-                step=1,
-                key="sidebar_width",
+                step=0.1,
+                key=f"sidebar_width_{st.session_state.get('preset_counter', 0)}",
             )
         with col2:
             height = st.number_input(
                 "Height (in)",
-                min_value=4,
-                max_value=20,
+                min_value=4.0,
+                max_value=20.0,
                 value=st.session_state.settings["height"],
-                step=1,
-                key="sidebar_height",
+                step=0.1,
+                key=f"sidebar_height_{st.session_state.get('preset_counter', 0)}",
             )
-        st.session_state.settings["width"] = width
-        st.session_state.settings["height"] = height
+        
+        # Always save from number inputs (preset flag only controls whether to skip on THIS rerun)
+        st.session_state.settings["width"] = float(width)
+        st.session_state.settings["height"] = float(height)
+        
+        # Reset preset flag after we've processed the number inputs
+        if st.session_state.preset_just_applied:
+            logger.info(f"Preset was applied, skipping number input values")
+            st.session_state.preset_just_applied = False
+            # Restore session state values that were set by preset
+            st.session_state.settings["width"] = float(st.session_state.settings["width"])
+            st.session_state.settings["height"] = float(st.session_state.settings["height"])
+        
+        width_px = int(width * st.session_state.settings["dpi"])
+        height_px = int(height * st.session_state.settings["dpi"])
+        st.caption(f"📐 Output: {width:.1f} in × {height:.1f} in ({width_px} × {height_px} px)")
 
         distance = st.slider(
             "Map Radius (m)",
@@ -184,7 +275,7 @@ def render_sidebar():
             step=1000,
             key="sidebar_distance",
         )
-        st.session_state.settings["distance"] = distance
+        st.session_state.settings["distance"] = int(distance)
 
         output_format = st.selectbox(
             "Output Format",
@@ -193,6 +284,17 @@ def render_sidebar():
             key="sidebar_format",
         )
         st.session_state.settings["format"] = output_format
+
+        dpi = st.slider(
+            "DPI (dots per inch)",
+            min_value=72.0,
+            max_value=600.0,
+            value=st.session_state.settings["dpi"],
+            step=72.0,
+            help="72-96 DPI for web/screens, 150-200 DPI for standard print, 300 DPI for high-quality print",
+            key="sidebar_dpi",
+        )
+        st.session_state.settings["dpi"] = float(dpi)
 
     with st.sidebar.expander("📝 Display Names"):
         display_city = st.text_input(
@@ -207,6 +309,61 @@ def render_sidebar():
         )
         st.session_state.location["display_city"] = display_city if display_city else None
         st.session_state.location["display_country"] = display_country if display_country else None
+
+    with st.sidebar.expander("📐 Aspect Ratio Presets"):
+        st.caption("Quick-select common aspect ratios:")
+
+        # Show current aspect ratio prominently
+        width = st.session_state.settings.get("width", 12.0)
+        height = st.session_state.settings.get("height", 16.0)
+        
+        current_ratio = calculate_aspect_ratio_display(width, height)
+        st.info(f"📐 Current: {current_ratio}")
+
+        st.markdown("**Desktop / Laptop (Landscape)**")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("16:9", key="preset_16_9", use_container_width=True):
+                apply_aspect_ratio(16, 9, 12)
+        with col2:
+            if st.button("16:10", key="preset_16_10", use_container_width=True):
+                apply_aspect_ratio(16, 10, 12)
+
+        st.markdown("**Phone (Portrait)**")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("9:16", key="preset_9_16", use_container_width=True):
+                apply_aspect_ratio(9, 16, 9)
+        with col2:
+            if st.button("9:19", key="preset_9_19", use_container_width=True):
+                apply_aspect_ratio(9, 19, 9)
+        with col3:
+            if st.button("9:20", key="preset_9_20", use_container_width=True):
+                apply_aspect_ratio(9, 20, 9)
+
+        st.markdown("**Print / Poster**")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("3:4 ⭐", key="preset_3_4", use_container_width=True):
+                apply_aspect_ratio(3, 4, 12)
+        with col2:
+            if st.button("2:3", key="preset_2_3", use_container_width=True):
+                apply_aspect_ratio(2, 3, 12)
+        with col3:
+            if st.button("A4", key="preset_a4", use_container_width=True):
+                st.session_state.settings["width"] = 11.7
+                st.session_state.settings["height"] = 8.3
+                st.rerun()
+
+        st.markdown("**Social Media**")
+        if st.button("1:1 (Instagram)", key="preset_1_1", use_container_width=True):
+            apply_aspect_ratio(1, 1, 12)
+        
+        st.divider()
+        st.caption("💡 Tips:")
+        st.caption("- Use presets for quick aspect ratios")
+        st.caption("- Manually adjust width/height for exact dimensions")
+        st.caption("- Pixel dimensions update with DPI setting")
 
     with st.sidebar.expander("🛣️ Road Styles"):
         # Global normalize option
@@ -387,6 +544,23 @@ def render_debug_panel():
                     else:
                         st.error("Test failed!")
                     st.rerun()
+        
+        with st.sidebar.expander("🔍 Session State Debug"):
+            st.write("**Settings:**")
+            st.write(f"- width: {st.session_state.settings.get('width', 'NOT SET')}")
+            st.write(f"- height: {st.session_state.settings.get('height', 'NOT SET')}")
+            st.write(f"- dpi: {st.session_state.settings.get('dpi', 'NOT SET')}")
+            st.write(f"- distance: {st.session_state.settings.get('distance', 'NOT SET')}")
+            
+            st.write("**Flags:**")
+            st.write(f"- preset_just_applied: {st.session_state.preset_just_applied}")
+            
+            st.write("**Aspect Ratio:**")
+            width = st.session_state.settings.get('width', 0)
+            height = st.session_state.settings.get('height', 0)
+            ratio = width / height if height > 0 else 0
+            st.write(f"- Current ratio: {ratio:.2f}")
+            st.write(f"- Display: {calculate_aspect_ratio_display(width, height)}")
 
 
 def render_main_area():
@@ -536,7 +710,7 @@ def render_results():
         city_slug = city.lower().replace(" ", "_")
         filename = f"{city_slug}_{theme_name}_{timestamp}.{output_format}"
 
-        image_bytes = fig_to_bytes(fig, format=output_format)
+        image_bytes = fig_to_bytes(fig, format=output_format, dpi=st.session_state.settings["dpi"])
 
         mime_types = {"png": "image/png", "svg": "image/svg+xml", "pdf": "application/pdf"}
         mime_type = mime_types.get(output_format, "image/png")
