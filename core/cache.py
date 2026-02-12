@@ -68,25 +68,25 @@ def cache_get_with_metadata(key: str) -> tuple[Any | None, dict[str, Any]]:
     try:
         path = _cache_path(key)
         metadata_path = _metadata_path(key)
-        
+
         if not path.exists():
             return None, {}
-        
+
         with open(path, "rb") as f:
             value = pickle.load(f)
-        
+
         metadata = {
             "age_seconds": 0,
             "created_at": 0,
         }
-        
+
         if metadata_path.exists():
             with open(metadata_path, "rb") as f:
                 metadata = pickle.load(f)
-        
+
         if metadata.get("created_at"):
             metadata["age_seconds"] = time.time() - metadata["created_at"]
-        
+
         return value, metadata
     except Exception:
         return None, {}
@@ -108,7 +108,7 @@ def cache_set(key: str, value: Any) -> None:
         path = _cache_path(key)
         with open(path, "wb") as f:
             pickle.dump(value, f, protocol=pickle.HIGHEST_PROTOCOL)
-        
+
         metadata_path = _metadata_path(key)
         metadata = {
             "created_at": time.time(),
@@ -137,7 +137,7 @@ def cache_set_with_ttl(key: str, value: Any, ttl_hours: int = 24) -> None:
         path = _cache_path(key)
         with open(path, "wb") as f:
             pickle.dump(value, f, protocol=pickle.HIGHEST_PROTOCOL)
-        
+
         metadata_path = _metadata_path(key)
         metadata = {
             "created_at": time.time(),
@@ -199,14 +199,14 @@ def cache_is_expired(key: str) -> bool:
         metadata_path = _metadata_path(key)
         if not metadata_path.exists():
             return True
-        
+
         with open(metadata_path, "rb") as f:
             metadata = pickle.load(f)
-        
+
         expires_at = metadata.get("expires_at")
         if expires_at:
             return time.time() > expires_at
-        
+
         return False
     except Exception:
         return True
@@ -222,12 +222,12 @@ def cache_get_stats() -> dict[str, Any]:
     cache_dir = get_cache_dir()
     if not cache_dir.exists():
         return {"count": 0, "size_bytes": 0, "expired": 0, "valid": 0}
-    
+
     count = 0
     size_bytes = 0
     expired = 0
     valid = 0
-    
+
     for file in cache_dir.glob("*.pkl"):
         count += 1
         size_bytes += file.stat().st_size
@@ -236,7 +236,7 @@ def cache_get_stats() -> dict[str, Any]:
             expired += 1
         else:
             valid += 1
-    
+
     return {
         "count": count,
         "size_bytes": size_bytes,

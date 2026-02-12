@@ -337,15 +337,15 @@ def render_debug_panel():
 
         with st.sidebar.expander("🌍 Geocoding Debug"):
             geo_debug = get_geocoding_debug_info()
-            
+
             col1, col2, col3 = st.columns(3)
             col1.metric("Requests", geo_debug["request_count"])
             col2.metric("Success", geo_debug["success_count"], delta_color="normal")
             col3.metric("Failed", geo_debug["failure_count"], delta_color="inverse")
-            
+
             if geo_debug["last_query"]:
                 st.text_input("Last Query", value=geo_debug["last_query"], disabled=True)
-            
+
             if geo_debug["last_result"]:
                 st.text_area(
                     "Last Result",
@@ -355,19 +355,19 @@ def render_debug_panel():
                     disabled=True,
                     height=100,
                 )
-            
+
             if geo_debug["last_error"]:
                 st.text_area("Last Error", value=geo_debug["last_error"], disabled=True, height=80)
-            
+
             if geo_debug["last_time"]:
                 st.caption(f"Last request: {geo_debug['last_time']}")
-            
+
             col1, col2 = st.columns(2)
             if col1.button("Clear Geocoding Debug", use_container_width=True):
                 clear_geocoding_debug_info()
                 st.success("Geocoding debug cleared!")
                 st.rerun()
-            
+
             if col2.button("Test Paris", use_container_width=True):
                 with st.spinner("Testing geocoding for Paris, France..."):
                     result = get_coordinates("Paris", "France")

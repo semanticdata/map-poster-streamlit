@@ -18,14 +18,20 @@ from geopandas import GeoDataFrame
 from geopy.exc import (
     GeocoderServiceError,
     GeocoderTimedOut,
-    GeocoderUnavailable,
 )
 from geopy.geocoders import Nominatim
 from matplotlib.font_manager import FontProperties
 from networkx import MultiDiGraph
 from shapely.geometry import Point
 
-from .cache import CacheError, cache_get, cache_get_with_metadata, cache_is_expired, cache_set, cache_set_with_ttl
+from .cache import (
+    CacheError,
+    cache_get,
+    cache_get_with_metadata,
+    cache_is_expired,
+    cache_set,
+    cache_set_with_ttl,
+)
 from .font_management import load_fonts
 
 logger = logging.getLogger(__name__)
@@ -307,7 +313,7 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
         (latitude, longitude) tuple or None if lookup fails
     """
     global _geocoding_debug_info
-    
+
     if not city or not country:
         logger.warning("Empty city or country provided to get_coordinates")
         _geocoding_debug_info["last_error"] = "Empty city or country"
@@ -317,7 +323,7 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
 
     coords_key = f"coords_{city.lower()}_{country.lower()}"
     cached, metadata = cache_get_with_metadata(coords_key)
-    
+
     if cached and not cache_is_expired(coords_key):
         age_hours = metadata.get("age_seconds", 0) / 3600
         logger.debug(f"Using valid cached coordinates for {city}, {country} (age: {age_hours:.1f}h)")
@@ -327,10 +333,10 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
         _geocoding_debug_info["success_count"] += 1
         _geocoding_debug_info["request_count"] += 1
         return cached
-    
+
     query = f"{city}, {country}"
     logger.info(f"Initiating geocoding lookup for: '{query}'")
-    
+
     _geocoding_debug_info["last_query"] = query
     _geocoding_debug_info["request_count"] += 1
     _geocoding_debug_info["last_result"] = None
@@ -340,10 +346,10 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
     logger.info(f"Nominatim geolocator configured with timeout={NOMINATIM_TIMEOUT}s, user_agent='{NOMINATIM_USER_AGENT}'")
 
     last_exception = None
-    
+
     for attempt in range(MAX_RETRIES):
         start_time = time.time()
-        
+
         if attempt > 0:
             delay = RATE_LIMIT_DELAY * (RETRY_BACKOFF_BASE ** (attempt - 1))
             logger.info(f"Retry attempt {attempt + 1}/{MAX_RETRIES}, waiting {delay:.1f}s before request...")
@@ -351,7 +357,7 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
         else:
             logger.info(f"Waiting {RATE_LIMIT_DELAY}s before geocoding request (rate limiting)")
             time.sleep(RATE_LIMIT_DELAY)
-        
+
         try:
             logger.info(f"Sending geocode request for '{query}' (attempt {attempt + 1}/{MAX_RETRIES})")
             location = geolocator.geocode(query)
@@ -363,7 +369,7 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
                 coords = (location.latitude, location.longitude)
                 logger.info(f"SUCCESS: Found coordinates for '{query}': lat={coords[0]:.6f}, lon={coords[1]:.6f}")
                 logger.info(f"Address details: {location.address}")
-                
+
                 _geocoding_debug_info["last_result"] = {
                     "coordinates": coords,
                     "address": location.address,
@@ -372,7 +378,7 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
                 }
                 _geocoding_debug_info["last_time"] = datetime.now().isoformat()
                 _geocoding_debug_info["success_count"] += 1
-                
+
                 try:
                     cache_set_with_ttl(coords_key, coords, ttl_hours=168)
                     logger.debug(f"Cached coordinates for {city}, {country} (7 days TTL)")
@@ -396,12 +402,12 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
                 _geocoding_debug_info["last_error"] = error_msg
                 _geocoding_debug_info["last_time"] = datetime.now().isoformat()
                 _geocoding_debug_info["failure_count"] += 1
-            
+
         except GeocoderServiceError as e:
             last_exception = e
             elapsed = time.time() - start_time
             error_msg = f"Geocoding service error after {elapsed:.2f}s: {e}"
-            
+
             if "509" in str(e) or "429" in str(e) or "Bandwidth Limit" in str(e) or "rate limit" in str(e).lower():
                 logger.warning(f"RATE LIMITED (attempt {attempt + 1}): {error_msg}")
                 if cached:
@@ -412,7 +418,7 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
                     _geocoding_debug_info["last_time"] = datetime.now().isoformat()
                     _geocoding_debug_info["success_count"] += 1
                     return cached
-                
+
                 if attempt == MAX_RETRIES - 1:
                     _geocoding_debug_info["last_error"] = f"{error_msg} - No cached data available"
                     _geocoding_debug_info["last_time"] = datetime.now().isoformat()
@@ -423,7 +429,7 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
                     _geocoding_debug_info["last_error"] = error_msg
                     _geocoding_debug_info["last_time"] = datetime.now().isoformat()
                     _geocoding_debug_info["failure_count"] += 1
-            
+
         except (ValueError, AttributeError) as e:
             last_exception = e
             elapsed = time.time() - start_time
@@ -433,7 +439,7 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
                 _geocoding_debug_info["last_error"] = error_msg
                 _geocoding_debug_info["last_time"] = datetime.now().isoformat()
                 _geocoding_debug_info["failure_count"] += 1
-            
+
         except Exception as e:
             last_exception = e
             elapsed = time.time() - start_time
@@ -445,7 +451,7 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
                 _geocoding_debug_info["last_error"] = error_msg
                 _geocoding_debug_info["last_time"] = datetime.now().isoformat()
                 _geocoding_debug_info["failure_count"] += 1
-    
+
     if cached:
         age_hours = metadata.get("age_seconds", 0) / 3600
         logger.warning(f"All retries failed, falling back to expired cache for {city}, {country} ({age_hours:.1f}h old)")
@@ -454,7 +460,7 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
         _geocoding_debug_info["last_time"] = datetime.now().isoformat()
         _geocoding_debug_info["success_count"] += 1
         return cached
-    
+
     return None
 
 
