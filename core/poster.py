@@ -6,6 +6,7 @@ Core functionality for generating map posters from OSM data.
 import io
 import logging
 import time
+from datetime import datetime
 from threading import RLock
 from typing import Any
 
@@ -14,27 +15,67 @@ import matplotlib.pyplot as plt
 import numpy as np
 import osmnx as ox
 from geopandas import GeoDataFrame
-from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
+from geopy.exc import (
+    GeocoderServiceError,
+    GeocoderTimedOut,
+    GeocoderUnavailable,
+)
 from geopy.geocoders import Nominatim
 from matplotlib.font_manager import FontProperties
 from networkx import MultiDiGraph
 from shapely.geometry import Point
 
-from .cache import CacheError, cache_get, cache_set
+from .cache import CacheError, cache_get, cache_get_with_metadata, cache_is_expired, cache_set, cache_set_with_ttl
 from .font_management import load_fonts
 
 logger = logging.getLogger(__name__)
 
 _plot_lock = RLock()
 
+_geocoding_debug_info = {
+    "last_query": None,
+    "last_result": None,
+    "last_error": None,
+    "last_time": None,
+    "request_count": 0,
+    "success_count": 0,
+    "failure_count": 0,
+}
+
+
+def get_geocoding_debug_info() -> dict[str, Any]:
+    """
+    Get debug information about recent geocoding attempts.
+
+    Returns:
+        Dictionary with debugging info about the last geocoding request
+    """
+    return _geocoding_debug_info.copy()
+
+
+def clear_geocoding_debug_info() -> None:
+    """Clear the geocoding debug information."""
+    global _geocoding_debug_info
+    _geocoding_debug_info = {
+        "last_query": None,
+        "last_result": None,
+        "last_error": None,
+        "last_time": None,
+        "request_count": 0,
+        "success_count": 0,
+        "failure_count": 0,
+    }
+
 ox.settings.use_cache = True
 ox.settings.log_console = False
 
 FONTS = load_fonts()
 
-NOMINATIM_USER_AGENT = "streamlit_map_poster"
+NOMINATIM_USER_AGENT = "streamlit_map_poster (database@omg.lol)"
 NOMINATIM_TIMEOUT = 10
 RATE_LIMIT_DELAY = 1.0
+MAX_RETRIES = 3
+RETRY_BACKOFF_BASE = 2.0
 
 ROAD_HIERARCHY = {
     "motorway": ["motorway", "motorway_link"],
@@ -265,46 +306,156 @@ def get_coordinates(city: str, country: str) -> tuple[float, float] | None:
     Returns:
         (latitude, longitude) tuple or None if lookup fails
     """
+    global _geocoding_debug_info
+    
     if not city or not country:
         logger.warning("Empty city or country provided to get_coordinates")
+        _geocoding_debug_info["last_error"] = "Empty city or country"
+        _geocoding_debug_info["last_time"] = datetime.now().isoformat()
+        _geocoding_debug_info["failure_count"] += 1
         return None
 
     coords_key = f"coords_{city.lower()}_{country.lower()}"
-    cached = cache_get(coords_key)
-    if cached:
-        logger.debug(f"Using cached coordinates for {city}, {country}")
+    cached, metadata = cache_get_with_metadata(coords_key)
+    
+    if cached and not cache_is_expired(coords_key):
+        age_hours = metadata.get("age_seconds", 0) / 3600
+        logger.debug(f"Using valid cached coordinates for {city}, {country} (age: {age_hours:.1f}h)")
+        _geocoding_debug_info["last_query"] = f"{city}, {country} (CACHED - valid, {age_hours:.1f}h old)"
+        _geocoding_debug_info["last_result"] = cached
+        _geocoding_debug_info["last_time"] = datetime.now().isoformat()
+        _geocoding_debug_info["success_count"] += 1
+        _geocoding_debug_info["request_count"] += 1
         return cached
+    
+    query = f"{city}, {country}"
+    logger.info(f"Initiating geocoding lookup for: '{query}'")
+    
+    _geocoding_debug_info["last_query"] = query
+    _geocoding_debug_info["request_count"] += 1
+    _geocoding_debug_info["last_result"] = None
+    _geocoding_debug_info["last_error"] = None
 
     geolocator = Nominatim(user_agent=NOMINATIM_USER_AGENT, timeout=NOMINATIM_TIMEOUT)
+    logger.info(f"Nominatim geolocator configured with timeout={NOMINATIM_TIMEOUT}s, user_agent='{NOMINATIM_USER_AGENT}'")
 
-    try:
-        time.sleep(RATE_LIMIT_DELAY)
-        location = geolocator.geocode(f"{city}, {country}")
+    last_exception = None
+    
+    for attempt in range(MAX_RETRIES):
+        start_time = time.time()
+        
+        if attempt > 0:
+            delay = RATE_LIMIT_DELAY * (RETRY_BACKOFF_BASE ** (attempt - 1))
+            logger.info(f"Retry attempt {attempt + 1}/{MAX_RETRIES}, waiting {delay:.1f}s before request...")
+            time.sleep(delay)
+        else:
+            logger.info(f"Waiting {RATE_LIMIT_DELAY}s before geocoding request (rate limiting)")
+            time.sleep(RATE_LIMIT_DELAY)
+        
+        try:
+            logger.info(f"Sending geocode request for '{query}' (attempt {attempt + 1}/{MAX_RETRIES})")
+            location = geolocator.geocode(query)
 
-        if location:
-            coords = (location.latitude, location.longitude)
-            try:
-                cache_set(coords_key, coords)
-                logger.debug(f"Cached coordinates for {city}, {country}")
-            except CacheError as e:
-                logger.warning(f"Failed to cache coordinates: {e}")
-            return coords
+            elapsed = time.time() - start_time
+            logger.info(f"Geocoding request completed in {elapsed:.2f}s")
 
-        logger.warning(f"Geocoding found no results for '{city}, {country}'")
-        return None
+            if location:
+                coords = (location.latitude, location.longitude)
+                logger.info(f"SUCCESS: Found coordinates for '{query}': lat={coords[0]:.6f}, lon={coords[1]:.6f}")
+                logger.info(f"Address details: {location.address}")
+                
+                _geocoding_debug_info["last_result"] = {
+                    "coordinates": coords,
+                    "address": location.address,
+                    "elapsed_seconds": elapsed,
+                    "attempt": attempt + 1,
+                }
+                _geocoding_debug_info["last_time"] = datetime.now().isoformat()
+                _geocoding_debug_info["success_count"] += 1
+                
+                try:
+                    cache_set_with_ttl(coords_key, coords, ttl_hours=168)
+                    logger.debug(f"Cached coordinates for {city}, {country} (7 days TTL)")
+                except CacheError as e:
+                    logger.warning(f"Failed to cache coordinates: {e}")
+                return coords
 
-    except GeocoderTimedOut:
-        logger.error(f"Geocoding timeout for '{city}, {country}'")
-        return None
-    except GeocoderUnavailable as e:
-        logger.error(f"Geocoding service unavailable: {e}")
-        return None
-    except (ValueError, AttributeError) as e:
-        logger.error(f"Invalid geocoding response for '{city}, {country}': {e}")
-        return None
-    except Exception as e:
-        logger.exception(f"Unexpected error geocoding '{city}, {country}': {e}")
-        return None
+            error_msg = f"Geocoding returned no results for '{query}'"
+            logger.warning(f"FAILED: {error_msg}")
+            _geocoding_debug_info["last_error"] = error_msg
+            _geocoding_debug_info["last_time"] = datetime.now().isoformat()
+            _geocoding_debug_info["failure_count"] += 1
+            break
+
+        except GeocoderTimedOut as e:
+            last_exception = e
+            elapsed = time.time() - start_time
+            error_msg = f"Geocoding timed out after {elapsed:.2f}s: {e}"
+            logger.warning(f"TIMEOUT (attempt {attempt + 1}): {error_msg}")
+            if attempt == MAX_RETRIES - 1:
+                _geocoding_debug_info["last_error"] = error_msg
+                _geocoding_debug_info["last_time"] = datetime.now().isoformat()
+                _geocoding_debug_info["failure_count"] += 1
+            
+        except GeocoderServiceError as e:
+            last_exception = e
+            elapsed = time.time() - start_time
+            error_msg = f"Geocoding service error after {elapsed:.2f}s: {e}"
+            
+            if "509" in str(e) or "429" in str(e) or "Bandwidth Limit" in str(e) or "rate limit" in str(e).lower():
+                logger.warning(f"RATE LIMITED (attempt {attempt + 1}): {error_msg}")
+                if cached:
+                    age_hours = metadata.get("age_seconds", 0) / 3600
+                    logger.info(f"Falling back to expired cache for {city}, {country} ({age_hours:.1f}h old)")
+                    _geocoding_debug_info["last_query"] = f"{city}, {country} (STALE CACHE fallback - {age_hours:.1f}h old)"
+                    _geocoding_debug_info["last_result"] = cached
+                    _geocoding_debug_info["last_time"] = datetime.now().isoformat()
+                    _geocoding_debug_info["success_count"] += 1
+                    return cached
+                
+                if attempt == MAX_RETRIES - 1:
+                    _geocoding_debug_info["last_error"] = f"{error_msg} - No cached data available"
+                    _geocoding_debug_info["last_time"] = datetime.now().isoformat()
+                    _geocoding_debug_info["failure_count"] += 1
+            else:
+                logger.warning(f"SERVICE ERROR (attempt {attempt + 1}): {error_msg}")
+                if attempt == MAX_RETRIES - 1:
+                    _geocoding_debug_info["last_error"] = error_msg
+                    _geocoding_debug_info["last_time"] = datetime.now().isoformat()
+                    _geocoding_debug_info["failure_count"] += 1
+            
+        except (ValueError, AttributeError) as e:
+            last_exception = e
+            elapsed = time.time() - start_time
+            error_msg = f"Invalid geocoding response after {elapsed:.2f}s: {e}"
+            logger.error(f"INVALID (attempt {attempt + 1}): {error_msg}")
+            if attempt == MAX_RETRIES - 1:
+                _geocoding_debug_info["last_error"] = error_msg
+                _geocoding_debug_info["last_time"] = datetime.now().isoformat()
+                _geocoding_debug_info["failure_count"] += 1
+            
+        except Exception as e:
+            last_exception = e
+            elapsed = time.time() - start_time
+            error_msg = f"Unexpected error after {elapsed:.2f}s: {e}"
+            logger.error(f"ERROR (attempt {attempt + 1}): {error_msg}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            if attempt == MAX_RETRIES - 1:
+                _geocoding_debug_info["last_error"] = error_msg
+                _geocoding_debug_info["last_time"] = datetime.now().isoformat()
+                _geocoding_debug_info["failure_count"] += 1
+    
+    if cached:
+        age_hours = metadata.get("age_seconds", 0) / 3600
+        logger.warning(f"All retries failed, falling back to expired cache for {city}, {country} ({age_hours:.1f}h old)")
+        _geocoding_debug_info["last_query"] = f"{city}, {country} (EXPIRED CACHE fallback - {age_hours:.1f}h old)"
+        _geocoding_debug_info["last_result"] = cached
+        _geocoding_debug_info["last_time"] = datetime.now().isoformat()
+        _geocoding_debug_info["success_count"] += 1
+        return cached
+    
+    return None
 
 
 def fetch_graph(point: tuple[float, float], dist: int) -> MultiDiGraph | None:
